@@ -13,15 +13,17 @@ class PingService:
         self.ping_interval = ping_interval
         self.logger = logging.getLogger("AuroraMonitor.Ping")
         
-        # Calculate history size to keep 300 seconds of data
-        # 300 seconds / ping_interval = number of pings in 300 seconds
-        history_size = max(60, 300 // ping_interval)  # Minimum 60, usually 60 pings for 5s interval
+        # Calculate history size to keep 5 minutes of data
+        # 300 seconds / ping_interval = number of pings in 5 minutes
+        safe_interval = max(1, ping_interval)
+        history_size = max(1, 300 // safe_interval)
         
-        # Store ping history for anomaly detection (300 seconds worth of data)
+        # Store ping history for anomaly detection
         self.ping_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=history_size))
         self.anomaly_counters: Dict[str, int] = defaultdict(int)
+        self.anomaly_active: Dict[str, bool] = defaultdict(bool)
         
-        self.logger.info(f"Ping history will keep last {history_size} pings (~300 seconds)")
+        self.logger.info(f"Ping history will keep last {history_size} pings (~5 minutes)")
     
     async def icmp_ping(self, host: str, timeout: int = 2) -> Tuple[bool, float]:
         """
@@ -89,33 +91,41 @@ class PingService:
         """Add latency measurement to target's history"""
         self.ping_history[target].append(latency)
     
-    def check_anomaly(self, target: str, current_latency: float) -> Tuple[bool, float]:
+    def check_anomaly(self, target: str, current_latency: float) -> Tuple[bool, bool, float]:
         """
-        Check if current latency is anomalous compared to historical average
-        Returns: (is_anomaly, average_latency)
+        Check if current latency is anomalous using robust baseline (median + MAD)
+        Returns: (anomaly_started, normalized, baseline_median)
         """
         history = self.ping_history[target]
         
-        # Need at least 10 samples for meaningful average
+        # Need at least 10 samples for meaningful baseline
         if len(history) < 10:
-            return False, 0.0
+            return False, False, 0.0
         
-        avg_latency = statistics.mean(history)
-        threshold = avg_latency * (1 + self.anomaly_threshold / 100)
+        baseline_median = statistics.median(history)
+        absolute_deviations = [abs(sample - baseline_median) for sample in history]
+        mad = statistics.median(absolute_deviations)
+        scaled_mad = mad * 1.4826
+        percentage_threshold = baseline_median * (1 + self.anomaly_threshold / 100)
+        mad_threshold = baseline_median + (3 * scaled_mad)
+        threshold = max(percentage_threshold, mad_threshold)
         
         if current_latency > threshold:
             self.anomaly_counters[target] += 1
             
-            if self.anomaly_counters[target] >= self.anomaly_count:
-                # Reset counter and return True
-                consecutive = self.anomaly_counters[target]
-                self.anomaly_counters[target] = 0
-                return True, avg_latency
+            if not self.anomaly_active[target] and self.anomaly_counters[target] >= self.anomaly_count:
+                self.anomaly_active[target] = True
+                return True, False, baseline_median
+
+            return False, False, baseline_median
         else:
             # Reset counter if latency is normal
             self.anomaly_counters[target] = 0
+            if self.anomaly_active[target]:
+                self.anomaly_active[target] = False
+                return False, True, baseline_median
         
-        return False, avg_latency
+        return False, False, baseline_median
     
     def get_average_latency(self, target: str) -> float:
         """Get average latency for a target"""
@@ -139,5 +149,6 @@ class PingService:
         return max(history)
     
     def reset_anomaly_counter(self, target: str):
-        """Reset anomaly counter for a target"""
+        """Reset anomaly state for a target"""
         self.anomaly_counters[target] = 0
+        self.anomaly_active[target] = False

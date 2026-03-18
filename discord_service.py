@@ -62,7 +62,7 @@ class DiscordService:
             # Create embed with statistics
             embed = discord.Embed(
                 title="📊 Estatísticas de Latência",
-                description=f"Latência e média dos últimos 300 segundos (5 min)",
+                description="Latência e média dos últimos 5 minutos",
                 color=0x00BFFF,
                 timestamp=datetime.utcnow()
             )
@@ -75,9 +75,9 @@ class DiscordService:
                     targets_text.append(
                         f"{status_icon} **{target_info['target']}**\n"
                         f"├ Atual: `{target_info['current_ms']:.2f}ms`\n"
-                        f"├ Média (5min): `{target_info['avg_ms']:.2f}ms`\n"
-                        f"├ Mínima (5min): `{target_info['min_ms']:.2f}ms`\n"
-                        f"└ Máxima (5min): `{target_info['max_ms']:.2f}ms`"
+                        f"├ Média (5 min): `{target_info['avg_ms']:.2f}ms`\n"
+                        f"├ Mínima (5 min): `{target_info['min_ms']:.2f}ms`\n"
+                        f"└ Máxima (5 min): `{target_info['max_ms']:.2f}ms`"
                     )
                 else:
                     targets_text.append(f"{status_icon} **{target_info['target']}** - SEM CONEXÃO")
@@ -124,7 +124,8 @@ class DiscordService:
         title: str, 
         description: str, 
         color: int, 
-        fields: Optional[List[Dict]] = None
+        fields: Optional[List[Dict]] = None,
+        mention_here: bool = False
     ):
         """Send alert to Discord channel"""
         if not self.channel:
@@ -147,7 +148,11 @@ class DiscordService:
                 )
         
         try:
-            await self.channel.send(embed=embed)
+            await self.channel.send(
+                content="@here" if mention_here else None,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(everyone=True)
+            )
         except Exception as e:
             self.logger.error(f"Failed to send Discord message: {e}")
     
@@ -178,7 +183,8 @@ class DiscordService:
                 {'name': 'Destino', 'value': target, 'inline': True},
                 {'name': 'Tipo', 'value': target_type, 'inline': True},
                 {'name': 'Tentativas Falhas', 'value': str(failed_attempts), 'inline': True}
-            ]
+            ],
+            mention_here=True
         )
     
     async def send_target_recovered_alert(
@@ -204,7 +210,7 @@ class DiscordService:
         target: str, 
         target_type: str, 
         current_latency: float, 
-        avg_latency: float, 
+        baseline_latency: float, 
         consecutive_count: int
     ):
         """Send alert for latency anomaly"""
@@ -216,8 +222,28 @@ class DiscordService:
                 {'name': 'Destino', 'value': target, 'inline': True},
                 {'name': 'Tipo', 'value': target_type, 'inline': True},
                 {'name': 'Latência Atual', 'value': f"{current_latency:.2f}ms", 'inline': True},
-                {'name': 'Latência Média', 'value': f"{avg_latency:.2f}ms", 'inline': True},
+                {'name': 'Baseline (mediana)', 'value': f"{baseline_latency:.2f}ms", 'inline': True},
                 {'name': 'Anomalias Consecutivas', 'value': str(consecutive_count), 'inline': True}
+            ]
+        )
+
+    async def send_latency_normalized_alert(
+        self,
+        target: str,
+        target_type: str,
+        current_latency: float,
+        baseline_latency: float
+    ):
+        """Send alert when latency returns to normal baseline"""
+        await self.send_alert(
+            title="✅ Latência Normalizada",
+            description=f"Latência da conexão com **{target}** voltou ao padrão esperado",
+            color=0x00FF00,  # Green
+            fields=[
+                {'name': 'Destino', 'value': target, 'inline': True},
+                {'name': 'Tipo', 'value': target_type, 'inline': True},
+                {'name': 'Latência Atual', 'value': f"{current_latency:.2f}ms", 'inline': True},
+                {'name': 'Baseline (mediana)', 'value': f"{baseline_latency:.2f}ms", 'inline': True}
             ]
         )
     

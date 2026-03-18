@@ -66,22 +66,30 @@ class MonitorService:
                 )
                 
                 if success:
-                    # Add to history for anomaly detection
+                    # Check anomaly before inserting current sample into history
+                    is_anomaly_started, is_normalized, baseline_latency = self.ping_service.check_anomaly(target, latency)
+
+                    # Add to history for future checks
                     self.ping_service.add_to_history(target, latency)
-                    
+
                     # Store latest latency
                     self.latest_latency[target] = latency
-                    
-                    # Check for anomalies
-                    is_anomaly, avg_latency = self.ping_service.check_anomaly(target, latency)
-                    
-                    if is_anomaly:
+
+                    if is_anomaly_started:
                         await self.discord_service.send_anomaly_alert(
                             target=target,
                             target_type=target_type,
                             current_latency=latency,
-                            avg_latency=avg_latency,
+                            baseline_latency=baseline_latency,
                             consecutive_count=self.anomaly_count
+                        )
+
+                    if is_normalized:
+                        await self.discord_service.send_latency_normalized_alert(
+                            target=target,
+                            target_type=target_type,
+                            current_latency=latency,
+                            baseline_latency=baseline_latency
                         )
                     
                     # If target was previously failed, send recovery alert
@@ -103,6 +111,8 @@ class MonitorService:
                             failed_attempts=failures
                         )
                         self.failed_targets[target] = True
+
+                    self.ping_service.reset_anomaly_counter(target)
                     
                     self.logger.warning(f"[{target_type}] {target}: FAILED ({failures}/{self.retry_attempts} attempts)")
                 
