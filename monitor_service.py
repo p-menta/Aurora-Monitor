@@ -22,6 +22,7 @@ class MonitorService:
         self.anomaly_threshold = float(os.getenv('ANOMALY_THRESHOLD', '30'))
         self.anomaly_count = int(os.getenv('ANOMALY_COUNT', '5'))
         self.failure_percentage = float(os.getenv('FAILURE_PERCENTAGE', '50'))
+        self.down_alert_failed_pings = 10
         
         # Remove empty strings from targets
         self.ping_targets = [t.strip() for t in self.ping_targets if t.strip()]
@@ -42,6 +43,7 @@ class MonitorService:
         
         # Track failed targets
         self.failed_targets: Dict[str, bool] = defaultdict(bool)
+        self.failed_ping_streak: Dict[str, int] = defaultdict(int)
         
         # Track latest latency for each target
         self.latest_latency: Dict[str, float] = {}
@@ -66,6 +68,8 @@ class MonitorService:
                 )
                 
                 if success:
+                    self.failed_ping_streak[target] = 0
+
                     # Check anomaly before inserting current sample into history
                     is_anomaly_started, is_normalized, baseline_latency = self.ping_service.check_anomaly(target, latency)
 
@@ -104,17 +108,23 @@ class MonitorService:
                     # self.logger.info(f"[{target_type}] {target}: {latency:.2f}ms (OK)")
                 else:
                     # Target failed all retries
-                    if not self.failed_targets[target]:
+                    self.failed_ping_streak[target] += 1
+                    current_streak = self.failed_ping_streak[target]
+
+                    if not self.failed_targets[target] and current_streak >= self.down_alert_failed_pings:
                         await self.discord_service.send_target_down_alert(
                             target=target,
                             target_type=target_type,
-                            failed_attempts=failures
+                            failed_attempts=current_streak
                         )
                         self.failed_targets[target] = True
 
                     self.ping_service.reset_anomaly_counter(target)
                     
-                    self.logger.warning(f"[{target_type}] {target}: FAILED ({failures}/{self.retry_attempts} attempts)")
+                    self.logger.warning(
+                        f"[{target_type}] {target}: FAILED ({failures}/{self.retry_attempts} attempts), "
+                        f"streak={current_streak}/{self.down_alert_failed_pings}"
+                    )
                 
             except Exception as e:
                 self.logger.error(f"Error monitoring {target}: {e}")

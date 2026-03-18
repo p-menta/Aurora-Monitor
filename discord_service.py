@@ -178,11 +178,11 @@ class DiscordService:
         await self.send_alert(
             title=f"⚠️ Conexão Perdida",
             description=f"Não foi possível conectar com **{target}**",
-            color=0xFFFF99,  # Light yellow
+            color=0xFF0000,  # Red
             fields=[
                 {'name': 'Destino', 'value': target, 'inline': True},
                 {'name': 'Tipo', 'value': target_type, 'inline': True},
-                {'name': 'Tentativas Falhas', 'value': str(failed_attempts), 'inline': True}
+                {'name': 'Falhas Consecutivas', 'value': str(failed_attempts), 'inline': True}
             ],
             mention_here=True
         )
