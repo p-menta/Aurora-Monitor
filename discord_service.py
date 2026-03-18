@@ -64,7 +64,7 @@ class DiscordService:
                 title="📊 Estatísticas de Latência",
                 description="Latência e média dos últimos 5 minutos",
                 color=0x00BFFF,
-                timestamp=datetime.utcnow()
+                timestamp=self._current_timestamp()
             )
             
             # Add all targets
@@ -100,6 +100,10 @@ class DiscordService:
             )
             
             await ctx.send(embed=embed)
+
+    def _current_timestamp(self) -> datetime:
+        """Get timezone-aware timestamp using local machine timezone"""
+        return datetime.now().astimezone()
     
     async def start_bot(self):
         """Start the Discord bot"""
@@ -136,7 +140,7 @@ class DiscordService:
             title=title,
             description=description,
             color=color,
-            timestamp=datetime.utcnow()
+            timestamp=self._current_timestamp()
         )
         
         if fields:
